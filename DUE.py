@@ -22,23 +22,23 @@ def normalize_probs(prob_dict):
     return prob_dict
 
 
-def compute_frontier_scores(S):
-    """Compute frontier scores based on visitation frequencies."""
-    # Lower visited nodes should have higher frontier scores
+def compute_uncharted_scores(S):
+    """Compute uncharted scores based on visitation frequencies."""
+    # Less visited nodes should have higher uncharted scores
     visits = np.array(list(S.values()))
-    # For simplicity, let’s define a frontier threshold as the median of visited counts
+    # Define an uncharted threshold as the median of visited counts
     threshold = np.median(visits) if len(visits) > 0 else 0
-    # Frontier score = max(0, threshold - visit_count), normalized later
+    # Uncharted score = max(0, threshold - visit_count), normalized later
     raw_scores = {node: max(0, threshold - S[node]) for node in all_nodes}
     total = sum(raw_scores.values()) if sum(raw_scores.values()) > 0 else 1
-    frontier_scores = {node: raw_scores[node]/total for node in all_nodes}
-    return frontier_scores
+    uncharted_scores = {node: raw_scores[node] / total for node in all_nodes}
+    return uncharted_scores
 
 
-def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=0.5,
+def due_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=0.5,
                           reward_strength=0.1, penalty_strength=0.1, update_interval=50):
     """
-    Adaptive Frontier Expansion (AFE) sampling for a directed graph.
+    Decentralized Uncharted Expansion (DUE) sampling for a directed graph.
 
     Parameters:
     - all_nodes: A set of all node IDs.
@@ -47,7 +47,7 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
     - sampling_ratio: Fraction of nodes to include in the final sampled network.
     - reward_strength: Magnitude of reward updates.
     - penalty_strength: Magnitude of penalty updates.
-    - update_interval: Frequency (in iterations) at which frontier scores are recalculated.
+    - update_interval: Frequency (in iterations) at which uncharted scores are recalculated.
 
     Returns:
     - sampled_nodes: The list of sampled nodes.
@@ -64,8 +64,8 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
     # Automaton state sets
     passive_set = set(all_nodes)  # Passive
     active_set = set()  # Active
-    fire_set = set()  # Fire
-    off_set = set()  # Off
+    fire_set = set()    # Fire
+    off_set = set()     # Off
 
     # Select a starting node at random
     starting_node = random.choice(list(passive_set))
@@ -73,7 +73,7 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
     active_set.add(starting_node)
     passive_set.remove(starting_node)
 
-    frontier_scores = compute_frontier_scores(S)
+    uncharted_scores = compute_uncharted_scores(S)
 
     k = 1
     while k <= K:
@@ -91,7 +91,7 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
         active_set.remove(firing_node)
         fire_set = {firing_node}
 
-        # Automaton chooses an action (outgoing neighbor) based on current probabilities
+        # Automaton chooses an action (outgoing neighbor)
         if firing_automaton.action_probs:
             neighbors = list(firing_automaton.action_probs.keys())
             probabilities = list(firing_automaton.action_probs.values())
@@ -99,7 +99,7 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
             firing_automaton.last_action = chosen_neighbor
 
             # Update visitation
-            S[firing_automaton] += 1
+            S[firing_node] += 1
             S[chosen_neighbor] += 1
 
             # Activate neighbors of chosen_neighbor if they are passive
@@ -112,15 +112,15 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
             chosen_neighbor = None
 
         # Determine reward or penalty:
-        # If the chosen action leads to a node with a high frontier score (less visited), reward
-        # If it leads to a node with a low frontier score (already well covered), penalize
+        # If the chosen action leads to a node with a high uncharted score (less visited), reward
+        # If it leads to a node with a low uncharted score (already well covered), penalize
         if chosen_neighbor is not None and firing_automaton.last_action is not None and firing_automaton.last_action in firing_automaton.action_probs:
             action = firing_automaton.last_action
-            # Compare frontier score of the reached node
-            f_score = frontier_scores.get(chosen_neighbor, 0)
+            # Compare uncharted score of the reached node
+            u_score = uncharted_scores.get(chosen_neighbor, 0)
 
-            if f_score > 0.5:  
-                # Node is considered frontier-like, reward action
+            if u_score > 0.5:  
+                # Node is considered uncharted, reward action
                 old_prob = firing_automaton.action_probs[action]
                 increase = reward_strength * (1 - old_prob)
                 firing_automaton.action_probs[action] = old_prob + increase
@@ -147,9 +147,9 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
         off_set.update(fire_set)
         fire_set = set()
 
-        # Periodically update frontier scores
+        # Periodically update uncharted scores
         if k % update_interval == 0:
-            frontier_scores = compute_frontier_scores()
+            uncharted_scores = compute_uncharted_scores(S)
 
         k += 1
 
@@ -181,18 +181,17 @@ for source, target in zip(df['SOURCE'], df['TARGET']):
         outgoing_neighbors[source] = set()
     outgoing_neighbors[source].add(target)
 
-# Apply AFE sampling
-sampled_nodes, sampled_edges = afe_sampling_directed(
+# Apply DUE sampling
+sampled_nodes, sampled_edges = due_sampling_directed(
     all_nodes=all_nodes,
     outgoing_neighbors=outgoing_neighbors,
-    K=1000,  # Number of iterations
-    sampling_ratio=0.1,  # 50% of nodes to be sampled
-    reward_strength=0.1,  # Reward strength for learning probabilities
-    penalty_strength=0.1,  # Penalty strength for learning probabilities
-    update_interval=50  # Update interval for frontier scores
+    K=1000,         # Number of iterations
+    sampling_ratio=0.1,  
+    reward_strength=0.1, 
+    penalty_strength=0.1,
+    update_interval=50  
 )
 
 # Output the results
 print("Sampled Nodes:", len(sampled_nodes))
 print("Sampled Edges:", len(sampled_edges))
-
