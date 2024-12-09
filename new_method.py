@@ -22,6 +22,19 @@ def normalize_probs(prob_dict):
     return prob_dict
 
 
+def compute_frontier_scores(S):
+    """Compute frontier scores based on visitation frequencies."""
+    # Lower visited nodes should have higher frontier scores
+    visits = np.array(list(S.values()))
+    # For simplicity, let’s define a frontier threshold as the median of visited counts
+    threshold = np.median(visits) if len(visits) > 0 else 0
+    # Frontier score = max(0, threshold - visit_count), normalized later
+    raw_scores = {node: max(0, threshold - S[node]) for node in all_nodes}
+    total = sum(raw_scores.values()) if sum(raw_scores.values()) > 0 else 1
+    frontier_scores = {node: raw_scores[node]/total for node in all_nodes}
+    return frontier_scores
+
+
 def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=0.5,
                           reward_strength=0.1, penalty_strength=0.1, update_interval=50):
     """
@@ -49,102 +62,90 @@ def afe_sampling_directed(all_nodes, outgoing_neighbors, K=1000, sampling_ratio=
     # Visited count
     S = {node: 0 for node in all_nodes}  
     # Automaton state sets
-    Pa = set(all_nodes)  # Passive
-    Ac = set()  # Active
-    Fi = set()  # Fire
-    Of = set()  # Off
+    passive_set = set(all_nodes)  # Passive
+    active_set = set()  # Active
+    fire_set = set()  # Fire
+    off_set = set()  # Off
 
     # Select a starting node at random
-    vs = random.choice(list(Pa))
-    automata[vs].activity_level = 'Active'
-    Ac.add(vs)
-    Pa.remove(vs)
+    starting_node = random.choice(list(passive_set))
+    automata[starting_node].activity_level = 'Active'
+    active_set.add(starting_node)
+    passive_set.remove(starting_node)
 
-    def compute_frontier_scores():
-        """Compute frontier scores based on visitation frequencies."""
-        # Lower visited nodes should have higher frontier scores
-        visits = np.array(list(S.values()))
-        # For simplicity, let’s define a frontier threshold as the median of visited counts
-        threshold = np.median(visits) if len(visits) > 0 else 0
-        # Frontier score = max(0, threshold - visit_count), normalized later
-        raw_scores = {node: max(0, threshold - S[node]) for node in all_nodes}
-        total = sum(raw_scores.values()) if sum(raw_scores.values()) > 0 else 1
-        frontier_scores = {node: raw_scores[node]/total for node in all_nodes}
-        return frontier_scores
-
-    frontier_scores = compute_frontier_scores()
+    frontier_scores = compute_frontier_scores(S)
 
     k = 1
     while k <= K:
-        if not Ac:
+        if not active_set:
             # If no active automata, select a new start
-            candidates = Pa if Pa else all_nodes
-            vs = random.choice(list(candidates))
-            automata[vs].activity_level = 'Active'
-            Ac.add(vs)
-            Pa.discard(vs)
+            candidates = passive_set if passive_set else all_nodes
+            starting_node = random.choice(list(candidates))
+            automata[starting_node].activity_level = 'Active'
+            active_set.add(starting_node)
+            passive_set.discard(starting_node)
 
         # Pick an active automaton to "fire"
-        As_node = random.choice(list(Ac))
-        As = automata[As_node]
-        Ac.remove(As_node)
-        Fi = {As_node}
+        firing_node = random.choice(list(active_set))
+        firing_automaton = automata[firing_node]
+        active_set.remove(firing_node)
+        fire_set = {firing_node}
 
         # Automaton chooses an action (outgoing neighbor) based on current probabilities
-        if As.action_probs:
-            neighbors = list(As.action_probs.keys())
-            probabilities = list(As.action_probs.values())
-            vm = np.random.choice(neighbors, p=probabilities)
-            As.last_action = vm
+        if firing_automaton.action_probs:
+            neighbors = list(firing_automaton.action_probs.keys())
+            probabilities = list(firing_automaton.action_probs.values())
+            chosen_neighbor = np.random.choice(neighbors, p=probabilities)
+            firing_automaton.last_action = chosen_neighbor
 
             # Update visitation
-            S[As_node] += 1
-            S[vm] += 1
+            S[firing_automaton] += 1
+            S[chosen_neighbor] += 1
 
-            # Activate neighbors of vm if they are passive
-            for nbr in outgoing_neighbors.get(vm, set()):
+            # Activate neighbors of chosen_neighbor if they are passive
+            for nbr in outgoing_neighbors.get(chosen_neighbor, set()):
                 if automata[nbr].activity_level == 'Passive':
                     automata[nbr].activity_level = 'Active'
-                    Ac.add(nbr)
-                    Pa.discard(nbr)
+                    active_set.add(nbr)
+                    passive_set.discard(nbr)
         else:
-            vm = None
+            chosen_neighbor = None
 
         # Determine reward or penalty:
         # If the chosen action leads to a node with a high frontier score (less visited), reward
         # If it leads to a node with a low frontier score (already well covered), penalize
-        if vm is not None and As.last_action is not None and As.last_action in As.action_probs:
-            action = As.last_action
+        if chosen_neighbor is not None and firing_automaton.last_action is not None and firing_automaton.last_action in firing_automaton.action_probs:
+            action = firing_automaton.last_action
             # Compare frontier score of the reached node
-            f_score = frontier_scores.get(vm, 0)
+            f_score = frontier_scores.get(chosen_neighbor, 0)
 
             if f_score > 0.5:  
                 # Node is considered frontier-like, reward action
-                old_prob = As.action_probs[action]
+                old_prob = firing_automaton.action_probs[action]
                 increase = reward_strength * (1 - old_prob)
-                As.action_probs[action] = old_prob + increase
+                firing_automaton.action_probs[action] = old_prob + increase
                 # Slightly decrease others
-                for a in As.action_probs:
+                for a in firing_automaton.action_probs:
                     if a != action:
-                        As.action_probs[a] *= (1 - reward_strength)
+                        firing_automaton.action_probs[a] *= (1 - reward_strength)
             else:
                 # Node is well visited, penalize action
-                old_prob = As.action_probs[action]
+                old_prob = firing_automaton.action_probs[action]
                 decrease = penalty_strength * old_prob
-                As.action_probs[action] = old_prob - decrease
+                firing_automaton.action_probs[action] = old_prob - decrease
                 # Part of penalty: Slightly boost other actions
-                other_actions = [a for a in As.action_probs if a != action]
+                other_actions = [a for a in firing_automaton.action_probs if a != action]
                 if other_actions:
                     for a in other_actions:
                         # Increase each other action proportionally
-                        As.action_probs[a] += (penalty_strength * (1 / len(other_actions))) * (1 - As.action_probs[a])
+                        firing_automaton.action_probs[a] += (penalty_strength * (1 / len(other_actions))) * (1 - firing_automaton.action_probs[a])
 
             # Normalize probabilities
-            As.action_probs = normalize_probs(As.action_probs)
+            firing_automaton.action_probs = normalize_probs(firing_automaton.action_probs)
 
         # Move fired automaton to Off
-        Of.update(Fi)
-        Fi = set()
+        off_set.update(fire_set)
+        fire_set = set()
 
         # Periodically update frontier scores
         if k % update_interval == 0:
