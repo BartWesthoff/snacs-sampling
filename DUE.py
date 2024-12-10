@@ -181,12 +181,13 @@ for source, target in zip(df['SOURCE'], df['TARGET']):
         outgoing_neighbors[source] = set()
     outgoing_neighbors[source].add(target)
 
+target_ratio = 0.1
 # Apply DUE sampling
 sampled_nodes, sampled_edges = due_sampling_directed(
     all_nodes=all_nodes,
     outgoing_neighbors=outgoing_neighbors,
     K=1000,         # Number of iterations
-    sampling_ratio=0.1,  
+    sampling_ratio=target_ratio,  # Target ratio of nodes to sample
     reward_strength=0.1, 
     penalty_strength=0.1,
     update_interval=50  
@@ -195,3 +196,5 @@ sampled_nodes, sampled_edges = due_sampling_directed(
 # Output the results
 print("Sampled Nodes:", len(sampled_nodes))
 print("Sampled Edges:", len(sampled_edges))
+print(f"Orginal Nodes: {len(all_nodes)}, Original Edges: {len(df)}")
+print(f"Target ratio of nodes to sample: {target_ratio}, actual ratio: {len(sampled_nodes) / len(all_nodes)}")
