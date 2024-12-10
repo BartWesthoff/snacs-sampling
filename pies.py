@@ -1,6 +1,6 @@
 import random
 import networkx as nx
-def pies_algorithm(G, phi):
+def pies_sampling(G, phi):
     """
     Implements the PIES algorithm for sampling a graph.
     
@@ -13,7 +13,7 @@ def pies_algorithm(G, phi):
     """
     # NOTE: Differs from original implementation, as we are using a graph instead of a list of edges
     edges = list(G.edges)
-    Gs = nx.Graph() 
+    Gs = nx.DiGraph() 
     target = len(G.edges) * phi
     for index,edge in enumerate(edges):
         u, v = edge
