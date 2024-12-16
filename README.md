@@ -1,2 +1,2 @@
 # snacs-sampling
-Introduction of DUE
+sampling from large networks
